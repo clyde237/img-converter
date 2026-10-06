@@ -2,10 +2,12 @@ import io
 import zipfile
 
 import pytest
-from PIL import Image, ImageCms, ImageDraw
+from PIL import Image, ImageCms, ImageDraw, ImageFilter
 
 from converter import (
     MAX_FILES,
+    MAX_QUALITY,
+    MIN_QUALITY,
     ConversionSettings,
     ImageConversionError,
     build_zip,
@@ -35,6 +37,20 @@ def decode(data: bytes) -> Image.Image:
 def photo(size=(800, 600)) -> Image.Image:
     # Dégradé plutôt qu'aplat : un aplat se compresse trop bien pour être représentatif.
     return Image.linear_gradient("L").resize(size).convert("RGB")
+
+
+def convert_image_at_fixed_quality(data: bytes, quality: int) -> bytes:
+    """WebP de la photo à une qualité donnée, sans réduction automatique."""
+    buffer = io.BytesIO()
+    Image.open(io.BytesIO(data)).save(buffer, "WEBP", quality=quality, method=6)
+    return buffer.getvalue()
+
+
+def textured_photo(size=(800, 600)) -> Image.Image:
+    """Grain proche d'une vraie photo : coûteux à encoder, surtout sans perte."""
+    grain = Image.effect_noise(size, 60).filter(ImageFilter.GaussianBlur(1.2))
+    gradient = Image.linear_gradient("L").resize(size)
+    return Image.merge("RGB", (grain, gradient, grain.transpose(Image.Transpose.FLIP_LEFT_RIGHT)))
 
 
 @pytest.mark.parametrize(
@@ -81,6 +97,7 @@ def test_line_art_falls_back_to_lossless_when_lossy_grows():
     result = convert_image(data, DEFAULT)
 
     assert len(result.data) < len(data)
+    assert result.quality is None
     assert decode(result.data).convert("RGB").getpixel((0, 199)) == (255, 255, 255)
 
 
@@ -223,20 +240,58 @@ def test_sixteen_bit_grayscale_is_not_saturated():
     assert output.getpixel((9, 0)) > 220
 
 
-def test_lossless_mode():
-    source = Image.new("RGB", (20, 20), (12, 34, 56))
+def test_photo_at_original_size_is_lighter_than_jpeg():
+    # Régression : en sans perte, une photo JPEG ressortait 2 à 6 fois plus lourde.
+    data = encode(textured_photo(), "JPEG", quality=85)
 
-    output = decode(convert_image(encode(source, "PNG"), ConversionSettings(lossless=True)).data)
+    result = convert_image(data, ConversionSettings(max_dimension=None))
 
-    assert output.getpixel((5, 5)) == (12, 34, 56)
+    assert len(result.data) < len(data)
+    assert result.quality == DEFAULT.quality
+
+
+def test_lowers_quality_when_webp_would_outweigh_original():
+    data = encode(textured_photo(), "JPEG", quality=40)
+
+    result = convert_image(data, ConversionSettings(quality=95, max_dimension=None))
+
+    assert len(result.data) <= len(data)
+    assert result.quality is not None
+    assert MIN_QUALITY <= result.quality < 95
+    # La qualité retenue est la plus haute qui tient sous le poids d'origine.
+    if result.quality < 95:
+        one_step_higher = convert_image_at_fixed_quality(data, result.quality + 5)
+        assert len(one_step_higher) > len(data)
+
+
+def test_heavily_compressed_photo_stops_at_minimum_quality_and_stays_lossy():
+    # Source si compressée qu'aucune qualité acceptable ne passe sous son poids :
+    # ni descente sous le plancher, ni bascule en sans perte (qui exploserait le poids).
+    data = encode(textured_photo(), "JPEG", quality=20)
+
+    result = convert_image(data, ConversionSettings(quality=MAX_QUALITY, max_dimension=None))
+
+    assert result.quality == MIN_QUALITY
+    assert len(data) < len(result.data) < 2 * len(data)
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [(95, [90, 85, 80, 75, 70]), (80, [75, 70]), (72, [70]), (70, [])],
+)
+def test_lower_qualities(requested, expected):
+    from converter import _lower_qualities
+
+    assert _lower_qualities(requested) == expected
 
 
 def test_keeps_original_webp_when_reencoding_grows_it():
     data = encode(photo((300, 300)), "WEBP", quality=10)
 
-    result = convert_image(data, ConversionSettings(quality=100))
+    result = convert_image(data, ConversionSettings(quality=MAX_QUALITY))
 
     assert result.data == data
+    assert result.kept_original
 
 
 def test_rejects_non_image_content_even_with_image_extension():
@@ -279,7 +334,7 @@ def test_rejects_animation_with_too_many_pixels_in_total(monkeypatch):
         convert_image(data, DEFAULT)
 
 
-@pytest.mark.parametrize("quality", [0, 101])
+@pytest.mark.parametrize("quality", [0, MIN_QUALITY - 1, MAX_QUALITY + 1, 100])
 def test_rejects_invalid_quality(quality):
     with pytest.raises(ValueError):
         ConversionSettings(quality=quality)
