@@ -12,10 +12,13 @@ from converter import (
     DEFAULT_QUALITY,
     MAX_FILE_SIZE_MB,
     MAX_FILES,
+    MAX_QUALITY,
+    MIN_QUALITY,
     ZIP_THRESHOLD,
     BatchResult,
     ConversionResult,
     ConversionSettings,
+    ConvertedImage,
     build_zip,
     convert_batch,
 )
@@ -63,6 +66,14 @@ def dimension_label(max_dimension: int) -> str:
     return "Originale" if max_dimension == ORIGINAL_SIZE else f"{max_dimension} px"
 
 
+def quality_label(image: ConvertedImage) -> str:
+    if image.kept_original:
+        return "original conservé"
+    if image.quality is None:
+        return "sans perte"
+    return str(image.quality)
+
+
 def render_header() -> None:
     st.title("Images prêtes pour le web")
     st.caption(
@@ -86,28 +97,23 @@ def render_form() -> tuple[list, ConversionSettings] | None:
 
         quality = st.slider(
             "Qualité",
-            min_value=1,
-            max_value=100,
+            min_value=MIN_QUALITY,
+            max_value=MAX_QUALITY,
             value=DEFAULT_QUALITY,
-            help="75–85 : bon compromis poids / netteté pour le web.",
+            help="80 : bon compromis poids / netteté pour le web. Si une image WebP pèse plus "
+            "que l'original, la qualité est réduite automatiquement, par pas de 5, sans jamais "
+            f"descendre sous {MIN_QUALITY}.",
         )
-        size_column, lossless_column = st.columns([3, 2], gap="large", vertical_alignment="bottom")
-        with size_column:
-            max_dimension = st.segmented_control(
-                "Plus grand côté",
-                options=MAX_DIMENSION_CHOICES,
-                default=DEFAULT_MAX_DIMENSION,
-                format_func=dimension_label,
-                required=True,
-                help="Réduit les images trop grandes, sans jamais agrandir les petites. "
-                "1920 px convient à la plupart des sites.",
-            )
-        with lossless_column:
-            lossless = st.toggle(
-                "Sans perte",
-                help="Pixels identiques à l'original. Utile pour logos et captures d'écran, "
-                "mais les fichiers sont nettement plus lourds pour les photos.",
-            )
+        max_dimension = st.segmented_control(
+            "Plus grand côté",
+            options=MAX_DIMENSION_CHOICES,
+            default=DEFAULT_MAX_DIMENSION,
+            format_func=dimension_label,
+            required=True,
+            help="Réduit les images trop grandes, sans jamais agrandir les petites. "
+            "1920 px convient à la plupart des sites ; « Originale » garde la pleine "
+            "définition et donne des fichiers bien plus lourds.",
+        )
 
         submitted = st.form_submit_button("Convertir en WebP", type="primary", icon=":material/bolt:")
 
@@ -116,7 +122,6 @@ def render_form() -> tuple[list, ConversionSettings] | None:
     return uploaded_files or [], ConversionSettings(
         quality=quality,
         max_dimension=None if max_dimension == ORIGINAL_SIZE else max_dimension,
-        lossless=lossless,
     )
 
 
@@ -147,6 +152,15 @@ def render_summary(stored: StoredConversion) -> None:
     after.metric("Après", format_size(output_total))
     change.metric("Poids", format_weight_change(saved_ratio))
 
+    heavier_count = sum(1 for result in results if result.output_size > result.original_size)
+    if heavier_count:
+        st.info(
+            f"{heavier_count} image(s) restent plus lourdes que l'original, même à qualité "
+            f"{MIN_QUALITY} : la source était déjà très compressée. La qualité n'est pas "
+            "descendue plus bas pour préserver le rendu.",
+            icon=":material/info:",
+        )
+
 
 def render_failures(stored: StoredConversion) -> None:
     if not stored.batch.failures:
@@ -175,12 +189,18 @@ def render_zip_download(stored: StoredConversion) -> None:
                 "Original": format_size(result.original_size),
                 "WebP": format_size(result.output_size),
                 "Dimensions": f"{result.image.width} × {result.image.height}",
+                "Qualité": quality_label(result.image),
                 "Poids": format_weight_change(result.saved_ratio),
             }
             for result in results
         ],
         hide_index=True,
         width="stretch",
+        column_config={
+            "Qualité": st.column_config.TextColumn(
+                help="Qualité réellement utilisée : elle est réduite si la WebP dépassait le poids d'origine."
+            )
+        },
     )
 
     with st.expander("Aperçu des images converties"):
@@ -199,7 +219,8 @@ def render_individual_downloads(results: list[ConversionResult]) -> None:
             details.markdown(f"**{result.output_name}**")
             details.caption(
                 f"{format_size(result.original_size)} → {format_size(result.output_size)} "
-                f"({format_weight_change(result.saved_ratio)}) · {result.image.width} × {result.image.height} px"
+                f"({format_weight_change(result.saved_ratio)}) · {result.image.width} × {result.image.height} px "
+                f"· qualité {quality_label(result.image)}"
             )
             action.download_button(
                 "Télécharger",

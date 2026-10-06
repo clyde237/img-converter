@@ -15,7 +15,7 @@ adapté au web.
 |---|---|
 | Rotation | La rotation EXIF des photos de smartphone est appliquée. |
 | Redimensionnement | Plus grand côté limité à 1280, 1920 (défaut) ou 2560 px, ou taille d'origine. Jamais d'agrandissement. |
-| Compression | WebP qualité 80 par défaut (réglable), ou sans perte. Si le lossy produit un fichier plus lourd que l'original (logos, captures d'écran), la version sans perte est tentée et la plus légère est gardée. |
+| Compression | WebP qualité 80 par défaut, réglable de 70 à 95. Objectif : alléger sans dégrader. Si la WebP dépasse le poids d'origine, le sans perte est tenté pour les sources sans perte (PNG, GIF… : logos, captures d'écran), puis la qualité baisse par pas de 5 jusqu'à la plus haute qui tient sous ce poids. Elle ne descend jamais sous 70 : en dessous, la perte de détail devient visible (mesure SSIM sur photos réelles). La qualité réellement utilisée est affichée. Une photo n'est jamais encodée sans perte : elle serait 2 à 6 fois plus lourde. |
 | Animations | Les GIF/PNG/WebP animés restent animés. |
 | Métadonnées | EXIF et XMP (position GPS, appareil…) supprimés. Le profil couleur RGB est conservé. |
 | Noms | `photo.jpg` → `photo.webp` ; les doublons deviennent `photo-2.webp`, `photo-3.webp`… |
@@ -61,5 +61,6 @@ L'application s'ouvre sur http://localhost:8501.
 - Les SVG ne sont pas acceptés : un format vectoriel est déjà idéal pour le web.
 - Les images CMJN sont converties en RGB sans gestion colorimétrique : les couleurs
   peuvent légèrement varier.
-- Une photo HEIC ou AVIF, déjà très compressée, peut être un peu plus lourde en WebP.
-  L'écart est affiché dans les résultats.
+- Une image déjà très compressée (HEIC, AVIF, JPEG de faible qualité) peut rester un peu
+  plus lourde en WebP, même à qualité 70. L'application le signale dans les résultats plutôt
+  que de dégrader davantage l'image.
