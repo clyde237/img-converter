@@ -1,0 +1,34 @@
+# Direction visuelle : minimalisme suisse — grille sobre, une seule couleur d'accent
+# (orange signal), typographie grotesque.
+
+[server]
+# Doit rester aligné avec MAX_FILE_SIZE_MB dans converter.py.
+maxUploadSize = 20
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+headingFont = "'Space Grotesk':https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&display=swap"
+headingFontWeights = [700, 600, 600, 500, 500, 500]
+baseRadius = "small"
+showWidgetBorder = true
+
+[theme.light]
+primaryColor = "#d9480f"
+backgroundColor = "#fbfaf8"
+secondaryBackgroundColor = "#f1efea"
+textColor = "#1a1918"
+borderColor = "#dcd8d0"
+
+[theme.dark]
+primaryColor = "#ff6b2c"
+backgroundColor = "#121110"
+secondaryBackgroundColor = "#1e1c1a"
+textColor = "#f1efea"
+borderColor = "#34312d"
