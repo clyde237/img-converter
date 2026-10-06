@@ -390,6 +390,21 @@ def test_batch_refuses_more_than_max_files():
         convert_batch(files, DEFAULT)
 
 
+def test_batch_refuses_total_weight_over_limit(monkeypatch):
+    monkeypatch.setattr("converter.MAX_TOTAL_SIZE_BYTES", 10)
+
+    with pytest.raises(ValueError, match="au total"):
+        convert_batch([("a.png", b"123456"), ("b.png", b"789012")], DEFAULT)
+
+
+def test_batch_accepts_total_weight_at_limit(monkeypatch):
+    monkeypatch.setattr("converter.MAX_TOTAL_SIZE_BYTES", 12)
+
+    batch = convert_batch([("a.png", b"123456"), ("b.png", b"789012")], DEFAULT)
+
+    assert len(batch.failures) == 2
+
+
 def test_batch_gives_unique_names_to_duplicates():
     data = encode(photo((10, 10)), "PNG")
     files = [("photo.png", data), ("photo.jpg", data), ("PHOTO.gif", encode(photo((10, 10)), "GIF"))]

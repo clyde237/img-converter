@@ -20,10 +20,14 @@ pillow_heif.register_heif_opener()
 
 logger = logging.getLogger(__name__)
 
-MAX_FILES = 30
+MAX_FILES = 100
 ZIP_THRESHOLD = 5
 MAX_FILE_SIZE_MB = 20
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+# Les fichiers envoyés restent en mémoire, et Streamlit Community Cloud ne donne que
+# 690 Mo à 2,7 Go de RAM à l'application, partagés entre tous les visiteurs.
+MAX_TOTAL_SIZE_MB = 300
+MAX_TOTAL_SIZE_BYTES = MAX_TOTAL_SIZE_MB * 1024 * 1024
 # Au-delà, une image décodée pèse plusieurs centaines de Mo en mémoire. Pour une
 # animation, toutes les frames sont gardées en mémoire : la limite porte sur leur total.
 MAX_PIXELS = 100_000_000
@@ -75,8 +79,9 @@ LOSSLESS_EFFORT = 80
 # Facteur entre une valeur 16 bits (0–65535) et 8 bits (0–255).
 SIXTEEN_TO_EIGHT_BIT = 257
 UNEXPECTED_ERROR_MESSAGE = "Erreur inattendue pendant la conversion."
-# Borné : chaque conversion en cours garde une image décodée en mémoire.
-CONVERSION_WORKERS = min(4, os.cpu_count() or 1)
+# Streamlit Community Cloud donne au plus 2 cœurs : au-delà, des threads en plus
+# n'accélèrent rien et gardent chacun une image décodée en mémoire.
+CONVERSION_WORKERS = min(2, os.cpu_count() or 1)
 
 
 class ImageConversionError(Exception):
@@ -189,6 +194,8 @@ def convert_batch(
     """
     if len(files) > MAX_FILES:
         raise ValueError(f"{MAX_FILES} fichiers maximum par conversion.")
+    if sum(len(data) for _, data in files) > MAX_TOTAL_SIZE_BYTES:
+        raise ValueError(f"{MAX_TOTAL_SIZE_MB} Mo maximum au total par conversion.")
 
     output_names = unique_names([webp_name(name) for name, _ in files])
     outcomes: list[ConversionResult | ConversionFailure | None] = [None] * len(files)

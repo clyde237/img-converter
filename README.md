@@ -3,7 +3,7 @@
 Plateforme Streamlit qui compresse et convertit des images en WebP, le format le plus
 adapté au web.
 
-- Jusqu'à **30 images** par conversion, **20 Mo** maximum par fichier.
+- Jusqu'à **100 images** par conversion, **20 Mo** maximum par fichier, **300 Mo** au total.
 - Formats acceptés : JPEG, PNG, GIF (animé compris), HEIC/HEIF, AVIF, WebP, TIFF, BMP,
   ICO, TGA, JPEG 2000. Le format est vérifié d'après le contenu du fichier, pas son extension.
 - Moins de 5 fichiers envoyés : un bouton de téléchargement par image.
