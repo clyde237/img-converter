@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
 
 import streamlit as st
+from PIL import Image
 
 from converter import (
     ACCEPTED_EXTENSIONS,
@@ -13,6 +15,8 @@ from converter import (
     MAX_FILE_SIZE_MB,
     MAX_FILES,
     MAX_QUALITY,
+    MAX_TOTAL_SIZE_BYTES,
+    MAX_TOTAL_SIZE_MB,
     MIN_QUALITY,
     ZIP_THRESHOLD,
     BatchResult,
@@ -29,6 +33,11 @@ ZIP_MIME = "application/zip"
 SESSION_KEY = "conversion"
 PREVIEW_COLUMNS = 5
 THUMBNAIL_WIDTH = 120
+# Taille des vignettes de l'aperçu (2× la largeur d'une colonne, pour les écrans haute
+# densité). Sans elles, Streamlit enverrait chaque image en 1460 px : ~20 Mo et ~20 s
+# de calcul pour 100 images.
+PREVIEW_SIZE = 240
+PREVIEW_QUALITY = 70
 # segmented_control renvoie None quand rien n'est sélectionné : la taille d'origine
 # a donc besoin de sa propre valeur pour ne pas être confondue avec ce cas.
 ORIGINAL_SIZE = 0
@@ -74,10 +83,19 @@ def quality_label(image: ConvertedImage) -> str:
     return str(image.quality)
 
 
+@st.cache_data(show_spinner=False, max_entries=MAX_FILES)
+def preview_thumbnail(image_data: bytes) -> bytes:
+    with Image.open(io.BytesIO(image_data)) as image:
+        image.thumbnail((PREVIEW_SIZE, PREVIEW_SIZE))
+        buffer = io.BytesIO()
+        image.save(buffer, "WEBP", quality=PREVIEW_QUALITY)
+    return buffer.getvalue()
+
+
 def render_header() -> None:
     st.title("Images prêtes pour le web")
     st.caption(
-        f"Compressez et convertissez jusqu'à {MAX_FILES} images en WebP. "
+        f"Compressez et convertissez jusqu'à {MAX_FILES} images ({MAX_TOTAL_SIZE_MB} Mo au total) en WebP. "
         f"À partir de {ZIP_THRESHOLD} fichiers, tout est regroupé dans un ZIP. "
         "Métadonnées (GPS, appareil) supprimées, rotation des photos corrigée."
     )
@@ -91,7 +109,8 @@ def render_form() -> tuple[list, ConversionSettings] | None:
             type=list(ACCEPTED_EXTENSIONS),
             accept_multiple_files=True,
             max_upload_size=MAX_FILE_SIZE_MB,
-            help=f"{MAX_FILES} fichiers maximum, {MAX_FILE_SIZE_MB} Mo par fichier. "
+            help=f"{MAX_FILES} fichiers maximum, {MAX_FILE_SIZE_MB} Mo par fichier, "
+            f"{MAX_TOTAL_SIZE_MB} Mo au total. "
             "JPEG, PNG, GIF (animé compris), HEIC, AVIF, WebP, TIFF, BMP, ICO…",
         )
 
@@ -203,12 +222,16 @@ def render_zip_download(stored: StoredConversion) -> None:
         },
     )
 
-    with st.expander("Aperçu des images converties"):
+    preview = st.expander("Aperçu des images converties", key="preview", on_change="rerun")
+    # Les vignettes ne sont calculées qu'une fois l'aperçu ouvert.
+    if not preview.open:
+        return
+    with preview:
         for start in range(0, len(results), PREVIEW_COLUMNS):
             row = results[start : start + PREVIEW_COLUMNS]
             # La dernière ligne peut compter moins d'images que de colonnes.
             for column, result in zip(st.columns(PREVIEW_COLUMNS), row, strict=False):
-                column.image(result.image.data, caption=result.output_name, width="stretch")
+                column.image(preview_thumbnail(result.image.data), caption=result.output_name, width="stretch")
 
 
 def render_individual_downloads(results: list[ConversionResult]) -> None:
@@ -261,6 +284,12 @@ def main() -> None:
             st.error(
                 f"{len(uploaded_files)} fichiers sélectionnés : {MAX_FILES} maximum. "
                 f"Retirez-en {len(uploaded_files) - MAX_FILES}.",
+                icon=":material/error:",
+            )
+        elif (total_size := sum(uploaded.size for uploaded in uploaded_files)) > MAX_TOTAL_SIZE_BYTES:
+            st.error(
+                f"Poids total {format_size(total_size)} : {MAX_TOTAL_SIZE_MB} Mo maximum. "
+                "Retirez des fichiers ou convertissez-les en plusieurs fois.",
                 icon=":material/error:",
             )
         else:
